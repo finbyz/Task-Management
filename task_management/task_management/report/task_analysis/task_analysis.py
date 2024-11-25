@@ -63,7 +63,7 @@ def get_columns():
         },
         {
             "fieldname": "edit_task",
-            "label": _("Edit Task"),
+            "label": _(""),
             "fieldtype": "Button",
             "width": 100
         }
@@ -441,3 +441,234 @@ def validate_task_permissions(task_name):
     """
     if not frappe.has_permission('Task', 'write', task_name):
         frappe.throw(_("No permission to edit task: {0}").format(task_name))
+
+@frappe.whitelist()
+def delete_task(task_data, delete_mode='single'):
+    """
+    Delete task and optionally its child tasks
+    
+    Args:
+        task_data (dict): Task data containing task name
+        delete_mode (str): 'single' for current task only, 'all' for task and all children
+    """
+    if not isinstance(task_data, dict):
+        task_data = frappe.parse_json(task_data)
+        
+    if not task_data:
+        frappe.throw(_("No task data provided"))
+    
+    try:
+        # Get the task name (remove any indentation spaces)
+        task_name = task_data.get('task', '').strip()
+        if not task_name:
+            frappe.throw(_("Task name is required"))
+            
+        # Get the actual task name from the display name
+        actual_task_name = get_actual_task_name(task_name)
+        if not actual_task_name:
+            frappe.throw(_("Task not found"))
+        
+        # Validate permissions
+        validate_task_permissions(actual_task_name)
+        
+        # Check for child tasks
+        child_tasks = get_all_child_tasks(actual_task_name)
+        if child_tasks and delete_mode != 'all':
+            frappe.throw(_("Task has child tasks. Please delete child tasks first or use 'Delete with Children' option."))
+        
+        # Begin deletion process
+        if delete_mode == 'all':
+            # Delete child tasks first (in reverse order to avoid dependency issues)
+            for child_task in reversed(child_tasks):
+                delete_single_task(child_task.name)
+        
+        # Delete the main task
+        delete_single_task(actual_task_name)
+        
+        frappe.db.commit()
+        
+        return {
+            "message": _("Task deleted successfully") if delete_mode == 'single' 
+                      else _("Task and all child tasks deleted successfully")
+        }
+        
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(frappe.get_traceback(), _("Task Delete Error"))
+        frappe.throw(_("Error deleting task: {0}").format(str(e)))
+
+def delete_single_task(task_name):
+    """
+    Delete a single task
+    
+    Args:
+        task_name (str): Name of the task to delete
+    """
+    try:
+        # Check if task exists
+        if not frappe.db.exists("Task", task_name):
+            frappe.throw(_("Task {0} does not exist").format(task_name))
+        
+        # Get task document
+        task = frappe.get_doc("Task", task_name)
+        
+        # Check if task is already deleted
+        if task.status == "Deleted":
+            frappe.throw(_("Task {0} is already deleted").format(task_name))
+        
+        # Check if task is part of a project
+        if task.project:
+            validate_project_permissions(task.project)
+        
+        # Log deletion activity
+        frappe.get_doc({
+            "doctype": "Comment",
+            "comment_type": "Deleted",
+            "reference_doctype": "Task",
+            "reference_name": task_name,
+            "content": _("Task deleted by {0}").format(frappe.session.user)
+        }).insert(ignore_permissions=True)
+        
+        # Delete the task
+        frappe.delete_doc("Task", task_name, ignore_permissions=True)
+        
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), f"Error deleting task {task_name}")
+        raise e
+
+def validate_project_permissions(project_name):
+    """
+    Validate if the current user has permission to modify tasks in the project
+    
+    Args:
+        project_name (str): Name of the project to check
+    """
+    if not frappe.has_permission('Project', 'write', project_name):
+        frappe.throw(_("No permission to modify tasks in project: {0}").format(project_name))
+        
+@frappe.whitelist()
+def copy_task_hierarchy(task_data, new_project=None, new_task_owner=None):
+    """
+    Copy a task and its entire hierarchy with attachments and descriptions
+    
+    Args:
+        task_data (dict): Original task data
+        new_project (str): Project to assign copied tasks to
+        new_task_owner (str): User to assign as task owner for copied tasks
+    """
+    if not isinstance(task_data, dict):
+        task_data = frappe.parse_json(task_data)
+    
+    try:
+        # Get the task name (remove any indentation spaces)
+        task_name = task_data.get('task', '').strip()
+        if not task_name:
+            frappe.throw(_("Task name is required"))
+            
+        # Get the actual task name from the display name
+        actual_task_name = get_actual_task_name(task_name)
+        if not actual_task_name:
+            frappe.throw(_("Task not found"))
+        
+        # Create mapping to store original task ID to new task ID
+        task_id_mapping = {}
+        
+        # Copy main task and get its children
+        new_task = copy_single_task(actual_task_name, new_project, new_task_owner, None)
+        task_id_mapping[actual_task_name] = new_task.name
+        
+        # Get and copy all child tasks
+        child_tasks = get_all_child_tasks(actual_task_name)
+        for child in child_tasks:
+            # Get the parent from the mapping
+            new_parent = task_id_mapping.get(
+                frappe.db.get_value('Task', child.name, 'parent_task')
+            )
+            # Copy the child task
+            new_child = copy_single_task(child.name, new_project, new_task_owner, new_parent)
+            task_id_mapping[child.name] = new_child.name
+        
+        frappe.db.commit()
+        
+        return {
+            "message": _("Task hierarchy copied successfully"),
+            "new_task_id": new_task.name
+        }
+        
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(frappe.get_traceback(), _("Task Copy Error"))
+        frappe.throw(_("Error copying task: {0}").format(str(e)))
+
+def copy_single_task(task_name, new_project, new_task_owner, new_parent):
+    """
+    Copy a single task with its attachments
+    
+    Args:
+        task_name (str): Name of the task to copy
+        new_project (str): New project to assign
+        new_task_owner (str): New task owner to assign
+        new_parent (str): New parent task name
+    
+    Returns:
+        Task: New task document
+    """
+    # Get original task
+    orig_task = frappe.get_doc('Task', task_name)
+    
+    # Create new task
+    new_task = frappe.new_doc('Task')
+    
+    # Copy all standard fields
+    exclude_fields = ['name', 'parent_task', 'project', 'custom_task_owner', 'creation', 
+                     'modified', 'modified_by', 'owner', 'docstatus', 'idx']
+    for field in orig_task.meta.fields:
+        if field.fieldname not in exclude_fields:
+            new_task.set(field.fieldname, orig_task.get(field.fieldname))
+    
+    # Set new values
+    new_task.project = new_project if new_project else None
+    new_task.custom_task_owner = new_task_owner if new_task_owner else None
+    new_task.parent_task = new_parent if new_parent else None
+    
+    # If no new project specified, include project name in subject
+    if not new_project and orig_task.project:
+        project_name = frappe.db.get_value('Project', orig_task.project, 'project_name')
+        new_task.subject = f"{project_name} - {orig_task.subject}"
+    
+    # Save the new task
+    new_task.insert(ignore_permissions=True)
+    
+    # Copy attachments
+    copy_attachments(orig_task.doctype, orig_task.name, new_task.doctype, new_task.name)
+    
+    return new_task
+
+def copy_attachments(from_doctype, from_name, to_doctype, to_name):
+    """
+    Copy attachments from one document to another
+    
+    Args:
+        from_doctype (str): Source doctype
+        from_name (str): Source document name
+        to_doctype (str): Target doctype
+        to_name (str): Target document name
+    """
+    files = frappe.db.sql("""
+        SELECT name, file_url, file_name, is_private
+        FROM tabFile 
+        WHERE attached_to_doctype = %s 
+        AND attached_to_name = %s
+    """, (from_doctype, from_name), as_dict=1)
+    
+    for file in files:
+        # Copy file
+        new_file = frappe.new_doc('File')
+        new_file.update({
+            'file_url': file.file_url,
+            'file_name': file.file_name,
+            'is_private': file.is_private,
+            'attached_to_doctype': to_doctype,
+            'attached_to_name': to_name
+        })
+        new_file.insert(ignore_permissions=True)
