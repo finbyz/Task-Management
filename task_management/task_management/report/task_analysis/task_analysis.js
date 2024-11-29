@@ -13,7 +13,7 @@ frappe.query_reports["Task Analysis"] = {
             options: "Task"
         },
         {
-            fieldname: "marked_for_week",
+            fieldname: "custom_marked_for_week_of_select_1st_day_of_the_week",
             label: __("Marked for week of"),
             fieldtype: "Date",
             description: "Select first day of week"
@@ -32,6 +32,7 @@ frappe.query_reports["Task Analysis"] = {
         }
     ],
 
+    
     onload: function(report) {
         // Add refresh button
         report.page.add_inner_button(__('Refresh'), () => {
@@ -42,6 +43,7 @@ frappe.query_reports["Task Analysis"] = {
         report.page.wrapper.off('click', '.edit-task-btn');
         report.page.wrapper.off('click', '.copy-task-btn');
         report.page.wrapper.off('click', '.delete-task-btn');
+        report.page.wrapper.off('click', '.add-subtask-btn');
 
         // Add new event handlers
         report.page.wrapper.on('click', '.edit-task-btn', function() {
@@ -58,13 +60,19 @@ frappe.query_reports["Task Analysis"] = {
             let taskData = JSON.parse(decodeURIComponent($(this).attr('data-task')));
             showDeleteDialog(taskData, report);
         });
+
+        report.page.wrapper.on('click', '.add-subtask-btn', function() {
+            let taskData = JSON.parse(decodeURIComponent($(this).attr('data-task')));
+            console.log(taskData)
+            showAddSubtaskDialog(taskData, report);
+        });
     },
 
     "formatter": function(value, row, column, data, default_formatter) {
         if (column.fieldname === "edit_task" && !data.is_project) {
             return `
                 <div class="btn-group">
-                    <button class="btn btn-xs btn-default edit-task-btn" 
+                    <button class="btn btn-xs btn-warning edit-task-btn" 
                         data-task='${encodeURIComponent(JSON.stringify(data))}'>
                         <i class="fa fa-pencil"></i>
                     </button>
@@ -76,9 +84,26 @@ frappe.query_reports["Task Analysis"] = {
                         data-task='${encodeURIComponent(JSON.stringify(data))}'>
                         <i class="fa fa-trash"></i>
                     </button>
+                    <button class="btn btn-xs btn-success add-subtask-btn" 
+                        data-task='${encodeURIComponent(JSON.stringify(data))}'>
+                        <i class="fa fa-plus"></i>
+                    </button>
                 </div>`;
         }
         return default_formatter(value, row, column, data);
+    }
+}
+
+frappe.query_reports['Task Analysis Report'] = {
+    'formatters': {
+        'task': function(value, d, f) {
+            // If it's a task with a valid task link
+            if (d.task && !d.is_project) {
+                return `<a href="/app/task/${d.task}">${d.task_display}</a>`;
+            }
+            // For projects or groups, return the display name
+            return d.task_display || value;
+        }
     }
 };
 
@@ -129,9 +154,9 @@ function showEditDialog(taskData, report) {
             },
             {
                 label: __('Marked For Week'),
-                fieldname: 'marked_for_week',
+                fieldname: 'custom_marked_for_week_of_select_1st_day_of_the_week',
                 fieldtype: 'Date',
-                default: taskData.marked_for_week
+                default: taskData.custom_marked_for_week_of_select_1st_day_of_the_week
             },
             {
                 label: __('Description'),
@@ -370,9 +395,139 @@ function copyTaskHierarchy(dialog, taskData, report) {
                 report.refresh();
                 
                 // Open the new task in a new tab
-                if (r.message && r.message.new_task_id) {
-                    frappe.set_route('Form', 'Task', r.message.new_task_id);
-                }
+                // if (r.message && r.message.new_task_id) {
+                //     frappe.set_route('Form', 'Task', r.message.new_task_id);
+                // }
+            } else {
+                frappe.msgprint({
+                    title: __('Error'),
+                    indicator: 'red',
+                    message: r.exc
+                });
+            }
+        }
+    });
+}
+
+function showAddSubtaskDialog(taskData, report) {
+    let d = new frappe.ui.Dialog({
+        title: __('Add Subtask'),
+        fields: [
+            {
+                label: __('Parent Task'),
+                fieldname: 'parent_task',
+                fieldtype: 'Data',
+                read_only: 1,
+                default: taskData.task_id.trim()
+            },
+            {
+                label: __('Task Subject'),
+                fieldname: 'subject',
+                fieldtype: 'Data',
+                reqd: 1
+            },
+            {
+                label: __('Task Owner'),
+                fieldname: 'task_owner',
+                fieldtype: 'Link',
+                options: 'User',
+                default: frappe.session.user
+            },
+            {
+                label: __('Status'),
+                fieldname: 'status',
+                fieldtype: 'Select',
+                options: 'Open\nWorking\nPending Review\nCompleted\nCancelled',
+                default: 'Open'
+            },
+            {
+                label: __('Priority'),
+                fieldname: 'priority',
+                fieldtype: 'Select',
+                options: 'Low\nMedium\nHigh',
+                default: taskData.priority || 'Medium'
+            },
+            {
+                label: __('Expected Start Date'),
+                fieldname: 'exp_start_date',
+                fieldtype: 'Date',
+                default: taskData.exp_end_date
+            },
+            {
+                label: __('Expected End Date'),
+                fieldname: 'exp_end_date',
+                fieldtype: 'Date'
+            },
+            {
+                label: __('Marked For Week'),
+                fieldname: 'custom_marked_for_week_of_select_1st_day_of_the_week',
+                fieldtype: 'Date',
+                default: taskData.custom_marked_for_week_of_select_1st_day_of_the_week
+            },
+            {
+                label: __('Description'),
+                fieldname: 'description',
+                fieldtype: 'Text Editor'
+            }
+        ],
+        primary_action_label: __('Create Subtask'),
+        primary_action: function() {
+            addSubtask(d, taskData, report);
+        }
+    });
+
+    d.show();
+}
+
+// Function to handle adding a subtask
+function addSubtask(dialog, parentTaskData, report) {
+    let values = dialog.get_values();
+    
+    if (!values) return;
+
+    // Validate dates
+    if (values.exp_start_date && values.exp_end_date && 
+        frappe.datetime.str_to_obj(values.exp_start_date) > frappe.datetime.str_to_obj(values.exp_end_date)) {
+        frappe.throw(__("Expected End Date cannot be before Expected Start Date"));
+        return;
+    }
+
+    // Add parent task information
+    values.parent_task = parentTaskData.task_id.trim();
+    values.project = parentTaskData.project || null;
+
+    frappe.call({
+        method: 'frappe.client.insert',
+        args: {
+            doc: {
+                doctype: 'Task',
+                subject: values.subject,
+                parent_task: values.parent_task,
+                project: values.project,
+                custom_task_owner: values.task_owner,
+                status: values.status,
+                priority: values.priority,
+                exp_start_date: values.exp_start_date,
+                exp_end_date: values.exp_end_date,
+                custom_marked_for_week_of_select_1st_day_of_the_week: values.custom_marked_for_week_of_select_1st_day_of_the_week,
+                description: values.description
+            }
+        },
+        freeze: true,
+        freeze_message: __('Creating Subtask...'),
+        callback: function(r) {
+            if (!r.exc) {
+                frappe.show_alert({
+                    message: __('Subtask created successfully'),
+                    indicator: 'green'
+                });
+                dialog.hide();
+                report.refresh();
+                
+                // Optionally, open the new subtask in a form view
+                // if (r.message) {
+                //     frappe.set_route('Form', 'Task', r.message.name);
+                // }
             } else {
                 frappe.msgprint({
                     title: __('Error'),

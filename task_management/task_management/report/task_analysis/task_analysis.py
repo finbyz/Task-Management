@@ -24,7 +24,7 @@ def get_columns():
             "width": 150
         },
         {
-            "fieldname": "marked_for_week",
+            "fieldname": "custom_marked_for_week_of_select_1st_day_of_the_week",
             "label": _("Marked For Week Of"),
             "fieldtype": "Date",
             "width": 120
@@ -65,7 +65,7 @@ def get_columns():
             "fieldname": "edit_task",
             "label": _(""),
             "fieldtype": "Button",
-            "width": 100
+            "width": 130
         }
     ]
 
@@ -124,9 +124,9 @@ def get_tasks(filters):
                 )
             """
     
-    if filters.get('marked_for_week'):
+    if filters.get('custom_marked_for_week_of_select_1st_day_of_the_week'):
         conditions.append(
-            f"custom_marked_for_week_of_select_1st_day_of_the_week = '{filters.get('marked_for_week')}'"
+            f"custom_marked_for_week_of_select_1st_day_of_the_week = '{filters.get('custom_marked_for_week_of_select_1st_day_of_the_week')}'"
         )
     
     if not filters.get('show_completed_tasks'):
@@ -155,7 +155,7 @@ def get_tasks(filters):
                 SELECT 1 FROM `tabTask` t2 
                 WHERE t2.parent_task = `tabTask`.name
             ) THEN 1 ELSE 0 END as is_group,
-            custom_marked_for_week_of_select_1st_day_of_the_week as marked_for_week,
+            custom_marked_for_week_of_select_1st_day_of_the_week,
             CASE 
                 WHEN parent_task IS NULL THEN 'grandparent'
                 ELSE 'child'
@@ -186,7 +186,7 @@ def prepare_data(filters, projects, tasks):
                 "status": project.status,
                 "priority": project.priority,
                 "description": "",
-                "marked_for_week": None,
+                "custom_marked_for_week_of_select_1st_day_of_the_week": None,
                 "task_owner": "",
                 "indent": 0,
                 "exp_start_date": project.expected_start_date,
@@ -222,12 +222,13 @@ def prepare_data(filters, projects, tasks):
                         "status": task.status,
                         "priority": task.priority,
                         "description": task.description,
-                        "marked_for_week": task.marked_for_week,
+                        "custom_marked_for_week_of_select_1st_day_of_the_week": task.custom_marked_for_week_of_select_1st_day_of_the_week,
                         "indent": level,
                         "is_group": task.is_group,
-                        "is_project": task.is_project
+                        "is_project": task.is_project,
+                        "task_id":task.name
                     }))
-    
+    # frappe.throw(str(data))
     return data
 
 def add_task_to_data(data, task, parent_children_map, level):
@@ -240,10 +241,11 @@ def add_task_to_data(data, task, parent_children_map, level):
         "status": task.status,
         "priority": task.priority,
         "description": task.description,
-        "marked_for_week": task.marked_for_week,
+        "custom_marked_for_week_of_select_1st_day_of_the_week": task.custom_marked_for_week_of_select_1st_day_of_the_week,
         "indent": level,
         "is_group": task.is_group,
-        "is_project": task.is_project
+        "is_project": task.is_project,
+        "task_id":task.name
     }))
     
     if task.name in parent_children_map:
@@ -251,10 +253,6 @@ def add_task_to_data(data, task, parent_children_map, level):
         children.sort(key=lambda x: x.name)
         for child in children:
             add_task_to_data(data, child, parent_children_map, level + 1)
-
-import frappe
-from frappe import _
-from frappe.utils import getdate
 
 @frappe.whitelist()
 def update_task(task_data, update_mode='single'):
@@ -320,7 +318,7 @@ def update_single_task(task_name, task_data):
         'priority': 'priority',
         'exp_start_date': 'exp_start_date',
         'exp_end_date': 'exp_end_date',
-        'marked_for_week': 'custom_marked_for_week_of_select_1st_day_of_the_week',
+        'custom_marked_for_week_of_select_1st_day_of_the_week': 'custom_marked_for_week_of_select_1st_day_of_the_week',
         'description': 'description'
     }
     
@@ -328,7 +326,7 @@ def update_single_task(task_name, task_data):
     for frontend_field, db_field in field_mapping.items():
         if task_data.get(frontend_field):
             # Handle date fields
-            if frontend_field in ['exp_start_date', 'exp_end_date', 'marked_for_week']:
+            if frontend_field in ['exp_start_date', 'exp_end_date', 'custom_marked_for_week_of_select_1st_day_of_the_week']:
                 task.set(db_field, getdate(task_data.get(frontend_field)))
             else:
                 task.set(db_field, task_data.get(frontend_field))
@@ -546,6 +544,10 @@ def validate_project_permissions(project_name):
     if not frappe.has_permission('Project', 'write', project_name):
         frappe.throw(_("No permission to modify tasks in project: {0}").format(project_name))
         
+import frappe
+from frappe import _
+from frappe.utils import getdate
+
 @frappe.whitelist()
 def copy_task_hierarchy(task_data, new_project=None, new_task_owner=None):
     """
@@ -584,7 +586,7 @@ def copy_task_hierarchy(task_data, new_project=None, new_task_owner=None):
             new_parent = task_id_mapping.get(
                 frappe.db.get_value('Task', child.name, 'parent_task')
             )
-            # Copy the child task
+            # Copy the child task, assigning it to the new project
             new_child = copy_single_task(child.name, new_project, new_task_owner, new_parent)
             task_id_mapping[child.name] = new_child.name
         
@@ -621,7 +623,7 @@ def copy_single_task(task_name, new_project, new_task_owner, new_parent):
     
     # Copy all standard fields
     exclude_fields = ['name', 'parent_task', 'project', 'custom_task_owner', 'creation', 
-                     'modified', 'modified_by', 'owner', 'docstatus', 'idx']
+                     'modified', 'modified_by', 'owner', 'docstatus', 'idx','depends_on', 'status']
     for field in orig_task.meta.fields:
         if field.fieldname not in exclude_fields:
             new_task.set(field.fieldname, orig_task.get(field.fieldname))
