@@ -17,11 +17,17 @@ def get_columns():
             "width": 300
         },
         {
+            "fieldname": "progress",
+            "label": _(""),
+            "fieldtype": "Data",  # Changed to Data to allow custom formatting
+            "width": 70
+        },
+        {
             "fieldname": "task_owner",
             "label": _("Task Owner"),
             "fieldtype": "Link",
             "options": "User",
-            "width": 150
+            "width": 200
         },
         {
             "fieldname": "custom_marked_for_week_of_select_1st_day_of_the_week",
@@ -65,7 +71,7 @@ def get_columns():
             "fieldname": "edit_task",
             "label": _(""),
             "fieldtype": "Button",
-            "width": 130
+            "width": 150
         }
     ]
 
@@ -91,6 +97,7 @@ def get_projects(filters):
             priority,
             expected_start_date,
             expected_end_date,
+            percent_complete,
             2 as is_group,  /* 2 for project to differentiate from tasks */
             1 as is_project
         FROM
@@ -167,6 +174,35 @@ def get_tasks(filters):
             {where_clause}
         ORDER BY project, parent_task, name
     """, as_dict=True)
+    
+def get_progress_color(progress):
+    """
+    Get the appropriate color based on the progress percentage
+    
+    Args:
+        progress (int): Progress percentage (0-100)
+    
+    Returns:
+        dict: Color styling for the progress indicator
+    """
+    if progress is None or progress == 0:
+        return {
+            'color': '#6b7280',  # Neutral gray
+            'background-color': '#f3f4f6'
+        }
+    
+    # If progress is less than 100, return orange/red tones
+    if progress < 100:
+        return {
+            'color': '#c53030',  # Dark red
+            'background-color': '#fff5f5'  # Light red background
+        }
+    # If progress is exactly 100, return green
+    elif progress == 100:
+        return {
+            'color': '#286840',  # Dark green
+            'background-color': '#eaf5ee'  # Light green background
+        }
 
 def prepare_data(filters, projects, tasks):
     data = []
@@ -181,8 +217,13 @@ def prepare_data(filters, projects, tasks):
         project_tasks = project_task_map.get(project.name, [])
         
         if project_tasks:
+            # Create colored progress for projects
+            project_progress = calculate_project_progress(project.name)
+            project_progress_display = create_progress_display(project_progress)
+            
             data.append(frappe._dict({
                 "task": cstr(project.subject),
+                "progress": project_progress_display,
                 "status": project.status,
                 "priority": project.priority,
                 "description": "",
@@ -199,7 +240,7 @@ def prepare_data(filters, projects, tasks):
             other_tasks = [t for t in project_tasks if t.task_type != 'grandparent']
             
             for gp_task in grandparent_tasks:
-                add_task_to_data(data, gp_task, parent_children_map, 1)
+                add_task_to_data(data, gp_task, parent_children_map, 1, show_progress=True)
             
             if not grandparent_tasks:
                 other_tasks.sort(key=lambda x: (x.parent_task or '', x.name))
@@ -213,28 +254,50 @@ def prepare_data(filters, projects, tasks):
                             ['parent_task'], as_dict=True)
                         current_parent = parent_info.get('parent_task') if parent_info else None
                     
+                    # Only show progress for top-level or important tasks
+                    show_progress = level <= 1
+                    
+                    # Modify task name to include indentation
                     task_name = '  ' * level + cstr(task.subject)
+                    
+                    # Calculate task progress
+                    task_progress = calculate_task_progress(task.name) if show_progress else None
+                    
+                    # Create progress display with styling
+                    progress_display = create_progress_display(task_progress) if show_progress else ""
+                    
                     data.append(frappe._dict({
                         "task": task_name,
+                        "progress": progress_display,
                         "task_owner": task.task_owner,
                         "exp_start_date": task.exp_start_date,
                         "exp_end_date": task.exp_end_date,
                         "status": task.status,
                         "priority": task.priority,
                         "description": task.description,
+                        "project": task.project,
                         "custom_marked_for_week_of_select_1st_day_of_the_week": task.custom_marked_for_week_of_select_1st_day_of_the_week,
                         "indent": level,
                         "is_group": task.is_group,
                         "is_project": task.is_project,
-                        "task_id":task.name
+                        "task_id": task.name
                     }))
-    # frappe.throw(str(data))
+    
     return data
 
-def add_task_to_data(data, task, parent_children_map, level):
+def add_task_to_data(data, task, parent_children_map, level, show_progress=False):
+    # Calculate task progress
+    task_progress = calculate_task_progress(task.name) if show_progress else None
+    
+    # Modify task name to include indentation
     task_name = '  ' * level + cstr(task.subject)
+    
+    # Create progress display with styling
+    progress_display = create_progress_display(task_progress) if show_progress else ""
+    
     data.append(frappe._dict({
         "task": task_name,
+        "progress": progress_display,
         "task_owner": task.task_owner,
         "exp_start_date": task.exp_start_date,
         "exp_end_date": task.exp_end_date,
@@ -245,14 +308,97 @@ def add_task_to_data(data, task, parent_children_map, level):
         "indent": level,
         "is_group": task.is_group,
         "is_project": task.is_project,
-        "task_id":task.name
+        "project": task.project,
+        "task_id": task.name
     }))
     
     if task.name in parent_children_map:
         children = parent_children_map[task.name]
         children.sort(key=lambda x: x.name)
         for child in children:
-            add_task_to_data(data, child, parent_children_map, level + 1)
+            # Pass down the current show_progress setting
+            add_task_to_data(data, child, parent_children_map, level + 1, show_progress)
+           
+def create_progress_display(progress):
+    """
+    Create a styled progress display with color
+    
+    Args:
+        progress (int or None): Progress percentage
+    
+    Returns:
+        str: HTML-formatted progress display with color styling
+    """
+    if progress is None:
+        return ""
+    
+    # Get color styling
+    progress_colors = get_progress_color(progress)
+    
+    # Create inline style
+    progress_style = (
+        f"color:{progress_colors['color']};"
+        f"background-color:{progress_colors['background-color']};"
+        "border-radius:20px;padding:2px 4px;"
+    )
+    
+    # Return styled progress
+    return f"<span style='{progress_style}'>{progress}%</span>"
+
+def calculate_project_progress(project_name):
+    """
+    Calculate project progress based on all tasks within the project
+    
+    Args:
+        project_name (str): Name of the project
+    
+    Returns:
+        int: Overall project progress percentage
+    """
+    # Get all tasks in the project
+    project_tasks = frappe.get_all('Task', 
+        filters={'project': project_name},
+        fields=['name', 'status']
+    )
+    
+    # If no tasks, return None
+    if not project_tasks:
+        return None
+    
+    # Count total and completed tasks
+    total_tasks = len(project_tasks)
+    completed_tasks = sum(1 for task in project_tasks if task.status == 'Completed')
+    
+    # Calculate and return progress percentage
+    return round((completed_tasks / total_tasks) * 100)
+
+def calculate_task_progress(task_name):
+    """
+    Calculate task progress based on child tasks' completion
+    
+    Args:
+        task_name (str): Name of the task to calculate progress for
+    
+    Returns:
+        int or None: Percentage of completed child tasks, or None if no children
+    """
+    # Get all child tasks
+    child_tasks = frappe.get_all('Task', 
+        filters={'parent_task': task_name},
+        fields=['name', 'status']
+    )
+    
+    # If no child tasks, return None
+    if not child_tasks:
+        return None
+    
+    # Count total and completed child tasks
+    total_tasks = len(child_tasks)
+    completed_tasks = sum(1 for task in child_tasks if task.status == 'Completed')
+    
+    # Calculate and return progress percentage
+    return round((completed_tasks / total_tasks) * 100)
+
 
 @frappe.whitelist()
 def update_task(task_data, update_mode='single'):
@@ -623,7 +769,8 @@ def copy_single_task(task_name, new_project, new_task_owner, new_parent):
     
     # Copy all standard fields
     exclude_fields = ['name', 'parent_task', 'project', 'custom_task_owner', 'creation', 
-                     'modified', 'modified_by', 'owner', 'docstatus', 'idx','depends_on', 'status']
+                     'modified', 'modified_by', 'owner', 'docstatus', 'idx','depends_on', 'status', 'exp_start_date'
+                     'exp_end_date', 'custom_marked_for_week_of_select_1st_day_of_the_week']
     for field in orig_task.meta.fields:
         if field.fieldname not in exclude_fields:
             new_task.set(field.fieldname, orig_task.get(field.fieldname))

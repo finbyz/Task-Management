@@ -39,53 +39,157 @@ frappe.query_reports["Task Analysis"] = {
             report.refresh();
         });
 
-        // Remove existing event handlers before adding new ones
-        report.page.wrapper.off('click', '.edit-task-btn');
-        report.page.wrapper.off('click', '.copy-task-btn');
-        report.page.wrapper.off('click', '.delete-task-btn');
-        report.page.wrapper.off('click', '.add-subtask-btn');
+        // Ensure event handlers are added after page is fully loaded
+        $(document).ready(function() {
+            // Remove existing event handlers
+            $(document)
+                .off('click', '.edit-task-btn')
+                .off('click', '.copy-task-btn')
+                .off('click', '.delete-task-btn')
+                .off('click', '.add-subtask-btn')
+                .off('click', '.goto-task-btn');
 
-        // Add new event handlers
-        report.page.wrapper.on('click', '.edit-task-btn', function() {
-            let taskData = JSON.parse(decodeURIComponent($(this).attr('data-task')));
-            showEditDialog(taskData, report);
-        });
+            // Add new event handlers using document-level delegation
+            $(document).on('click', '.edit-task-btn', function(e) {
+                try {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Edit Task Button Clicked');
+                    
+                    let taskDataEncoded = $(this).attr('data-task');
+                    if (!taskDataEncoded) {
+                        console.error('No task data found');
+                        return;
+                    }
+                    console.log("task encoded",$(this).attr('data-task'))
+                    let taskData = JSON.parse(decodeURIComponent(taskDataEncoded));
+                    console.log('Task Data:', taskData);
+                    
+                    showEditDialog(taskData, report);
+                } catch (error) {
+                    console.error('Error in edit task handler:', error);
+                }
+            });
 
-        report.page.wrapper.on('click', '.copy-task-btn', function() {
-            let taskData = JSON.parse(decodeURIComponent($(this).attr('data-task')));
-            showCopyDialog(taskData, report);
-        });
+            $(document).on('click', '.copy-task-btn', function(e) {
+                try {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Copy Task Button Clicked');
+                    
+                    let taskDataEncoded = $(this).attr('data-task');
+                    if (!taskDataEncoded) {
+                        console.error('No task data found');
+                        return;
+                    }
+                    
+                    let taskData = JSON.parse(decodeURIComponent(taskDataEncoded));
+                    console.log('Task Data:', taskData);
+                    
+                    showCopyDialog(taskData, report);
+                } catch (error) {
+                    console.error('Error in copy task handler:', error);
+                }
+            });
 
-        report.page.wrapper.on('click', '.delete-task-btn', function() {
-            let taskData = JSON.parse(decodeURIComponent($(this).attr('data-task')));
-            showDeleteDialog(taskData, report);
-        });
+            $(document).on('click', '.delete-task-btn', function(e) {
+                try {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Delete Task Button Clicked');
+                    
+                    let taskDataEncoded = $(this).attr('data-task');
+                    if (!taskDataEncoded) {
+                        console.error('No task data found');
+                        return;
+                    }
+                    
+                    let taskData = JSON.parse(decodeURIComponent(taskDataEncoded));
+                    console.log('Task Data:', taskData);
+                    
+                    showDeleteDialog(taskData, report);
+                } catch (error) {
+                    console.error('Error in delete task handler:', error);
+                }
+            });
 
-        report.page.wrapper.on('click', '.add-subtask-btn', function() {
-            let taskData = JSON.parse(decodeURIComponent($(this).attr('data-task')));
-            console.log(taskData)
-            showAddSubtaskDialog(taskData, report);
+            $(document).on('click', '.add-subtask-btn', function(e) {
+                try {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Add Subtask Button Clicked');
+                    
+                    let taskDataEncoded = $(this).attr('data-task');
+                    if (!taskDataEncoded) {
+                        console.error('No task data found');
+                        return;
+                    }
+                    
+                    let taskData = JSON.parse(decodeURIComponent(taskDataEncoded));
+                    console.log('Task Data:', taskData);
+                    
+                    showAddSubtaskDialog(taskData, report);
+                } catch (error) {
+                    console.error('Error in add subtask handler:', error);
+                }
+            });
+
+            $(document).on('click', '.goto-task-btn', function(e) {
+                try {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Go to Task Button Clicked');
+                    
+                    let taskId = $(this).attr('data-task-id');
+                    if (taskId) {
+                        window.open(`/app/task/${taskId}`, '_blank');
+                    } else {
+                        console.error('No task ID found');
+                    }
+                } catch (error) {
+                    console.error('Error in go to task handler:', error);
+                }
+            });
         });
     },
 
     "formatter": function(value, row, column, data, default_formatter) {
+        console.log(data)
         if (column.fieldname === "edit_task" && !data.is_project) {
+            // Create a copy of data and remove progress field
+            const dataWithoutProgress = {...data};
+            delete dataWithoutProgress.progress;
+
+            // Safely handle potential undefined or null values
+            const safeTaskData = JSON.stringify({
+                task_id: dataWithoutProgress.task_id || '',
+                task: dataWithoutProgress.task ? dataWithoutProgress.task.toString().trim().split(' - <span')[0].trim() : '',
+                description: dataWithoutProgress.description ? dataWithoutProgress.description.toString().trim() : '',
+                // Add other relevant fields as needed
+                ...dataWithoutProgress
+            });
+            console.log("safe",safeTaskData)
+
             return `
                 <div class="btn-group">
+                    <button class="btn btn-xs btn-primary goto-task-btn" 
+                        data-task-id='${dataWithoutProgress.task_id || ''}'>
+                        <i class="fa fa-external-link"></i>
+                    </button>
                     <button class="btn btn-xs btn-warning edit-task-btn" 
-                        data-task='${encodeURIComponent(JSON.stringify(data))}'>
+                        data-task='${encodeURIComponent(safeTaskData)}'>
                         <i class="fa fa-pencil"></i>
                     </button>
                     <button class="btn btn-xs btn-info copy-task-btn" 
-                        data-task='${encodeURIComponent(JSON.stringify(data))}'>
+                        data-task='${encodeURIComponent(safeTaskData)}'>
                         <i class="fa fa-copy"></i>
                     </button>
                     <button class="btn btn-xs btn-danger delete-task-btn" 
-                        data-task='${encodeURIComponent(JSON.stringify(data))}'>
+                        data-task='${encodeURIComponent(safeTaskData)}'>
                         <i class="fa fa-trash"></i>
                     </button>
                     <button class="btn btn-xs btn-success add-subtask-btn" 
-                        data-task='${encodeURIComponent(JSON.stringify(data))}'>
+                        data-task='${encodeURIComponent(safeTaskData)}'>
                         <i class="fa fa-plus"></i>
                     </button>
                 </div>`;
@@ -94,21 +198,12 @@ frappe.query_reports["Task Analysis"] = {
     }
 }
 
-frappe.query_reports['Task Analysis Report'] = {
-    'formatters': {
-        'task': function(value, d, f) {
-            // If it's a task with a valid task link
-            if (d.task && !d.is_project) {
-                return `<a href="/app/task/${d.task}">${d.task_display}</a>`;
-            }
-            // For projects or groups, return the display name
-            return d.task_display || value;
-        }
-    }
-};
-
 // Function to show edit dialog
 function showEditDialog(taskData, report) {
+    // Create a copy of taskData and remove progress field
+    const taskDataWithoutProgress = {...taskData};
+    delete taskDataWithoutProgress.progress;
+
     let d = new frappe.ui.Dialog({
         title: __('Edit Task'),
         fields: [
@@ -117,66 +212,67 @@ function showEditDialog(taskData, report) {
                 fieldname: 'task',
                 fieldtype: 'Data',
                 read_only: 1,
-                default: taskData.task.trim()
+                default: taskDataWithoutProgress.task.trim()
             },
             {
                 label: __('Task Owner'),
                 fieldname: 'task_owner',
                 fieldtype: 'Link',
                 options: 'User',
-                default: taskData.task_owner
+                default: taskDataWithoutProgress.task_owner
             },
             {
                 label: __('Status'),
                 fieldname: 'status',
                 fieldtype: 'Select',
+                read_only:1,
                 options: 'Open\nWorking\nPending Review\nCompleted\nCancelled',
-                default: taskData.status
+                default: taskDataWithoutProgress.status
             },
             {
                 label: __('Priority'),
                 fieldname: 'priority',
                 fieldtype: 'Select',
                 options: 'Low\nMedium\nHigh',
-                default: taskData.priority
+                default: taskDataWithoutProgress.priority
             },
             {
                 label: __('Expected Start Date'),
                 fieldname: 'exp_start_date',
                 fieldtype: 'Date',
-                default: taskData.exp_start_date
+                default: taskDataWithoutProgress.exp_start_date
             },
             {
                 label: __('Expected End Date'),
                 fieldname: 'exp_end_date',
                 fieldtype: 'Date',
-                default: taskData.exp_end_date
+                default: taskDataWithoutProgress.exp_end_date
             },
             {
                 label: __('Marked For Week'),
                 fieldname: 'custom_marked_for_week_of_select_1st_day_of_the_week',
                 fieldtype: 'Date',
-                default: taskData.custom_marked_for_week_of_select_1st_day_of_the_week
+                default: taskDataWithoutProgress.custom_marked_for_week_of_select_1st_day_of_the_week
             },
             {
                 label: __('Description'),
                 fieldname: 'description',
                 fieldtype: 'Text Editor',
-                default: taskData.description
+                default: taskDataWithoutProgress.description
             }
         ],
         primary_action_label: __('Update Task'),
-        secondary_action_label: taskData.is_group ? __('Update All Child Tasks') : null,
+        secondary_action_label: taskDataWithoutProgress.is_group ? __('Update All Child Tasks') : null,
         
         primary_action: function() {
-            updateTask(d, taskData, report, 'single');
+            updateTask(d, taskDataWithoutProgress, report, 'single');
         }
     });
 
     // Add secondary action for parent tasks
-    if (taskData.is_group) {
+    if (taskDataWithoutProgress.is_group) {
         d.set_secondary_action(() => {
-            updateTask(d, taskData, report, 'all');
+            updateTask(d, taskDataWithoutProgress, report, 'all');
         });
     }
 
@@ -185,6 +281,10 @@ function showEditDialog(taskData, report) {
 
 // Function to show copy dialog
 function showCopyDialog(taskData, report) {
+    // Create a copy of taskData and remove progress field
+    const taskDataWithoutProgress = {...taskData};
+    delete taskDataWithoutProgress.progress;
+
     let d = new frappe.ui.Dialog({
         title: __('Copy Task Hierarchy'),
         fields: [
@@ -193,7 +293,7 @@ function showCopyDialog(taskData, report) {
                 fieldname: 'task',
                 fieldtype: 'Data',
                 read_only: 1,
-                default: taskData.task.trim()
+                default: taskDataWithoutProgress.task.trim()
             },
             {
                 label: __('New Project'),
@@ -220,7 +320,7 @@ function showCopyDialog(taskData, report) {
                             <li>${__('- All child tasks')}</li>
                             <li>${__('- Descriptions')}</li>
                             <li>${__('- Attachments')}</li>
-                            ${!taskData.is_project ? 
+                            ${!taskDataWithoutProgress.is_project ? 
                                 `<li>${__('If no project is selected, the project name will be included in the task subject')}</li>` 
                                 : ''}
                         </ul>
@@ -229,7 +329,7 @@ function showCopyDialog(taskData, report) {
         ],
         primary_action_label: __('Copy'),
         primary_action: function() {
-            copyTaskHierarchy(d, taskData, report);
+            copyTaskHierarchy(d, taskDataWithoutProgress, report);
         }
     });
 
@@ -238,6 +338,10 @@ function showCopyDialog(taskData, report) {
 
 // Function to show delete dialog
 function showDeleteDialog(taskData, report) {
+    // Create a copy of taskData and remove progress field
+    const taskDataWithoutProgress = {...taskData};
+    delete taskDataWithoutProgress.progress;
+
     let d = new frappe.ui.Dialog({
         title: __('Delete Task'),
         fields: [
@@ -246,7 +350,7 @@ function showDeleteDialog(taskData, report) {
                 fieldname: 'task',
                 fieldtype: 'Data',
                 read_only: 1,
-                default: taskData.task.trim()
+                default: taskDataWithoutProgress.task.trim()
             },
             {
                 label: __('Delete Mode'),
@@ -257,7 +361,7 @@ function showDeleteDialog(taskData, report) {
                     {label: __('Delete Task with Children'), value: 'all'}
                 ],
                 default: 'single',
-                depends_on: `eval:${taskData.is_group}`,
+                depends_on: `eval:${taskDataWithoutProgress.is_group}`,
                 mandatory: 1
             },
             {
@@ -266,7 +370,7 @@ function showDeleteDialog(taskData, report) {
                 options: `
                     <div class="alert alert-warning">
                         <p><strong>${__('Warning')}:</strong> ${__('This action cannot be undone.')}</p>
-                        ${taskData.is_group ? 
+                        ${taskDataWithoutProgress.is_group ? 
                             `<p>${__('This task has child tasks. Selecting "Delete Task with Children" will delete all child tasks as well.')}</p>` 
                             : ''}
                     </div>`
@@ -281,12 +385,13 @@ function showDeleteDialog(taskData, report) {
         ],
         primary_action_label: __('Delete Task'),
         primary_action: function() {
-            deleteTask(d, taskData, report);
+            deleteTask(d, taskDataWithoutProgress, report);
         }
     });
 
     d.show();
 }
+
 
 // Function to handle task update
 function updateTask(dialog, taskData, report, update_mode) {
@@ -410,6 +515,7 @@ function copyTaskHierarchy(dialog, taskData, report) {
 }
 
 function showAddSubtaskDialog(taskData, report) {
+    console.log(taskData)
     let d = new frappe.ui.Dialog({
         title: __('Add Subtask'),
         fields: [
@@ -419,6 +525,13 @@ function showAddSubtaskDialog(taskData, report) {
                 fieldtype: 'Data',
                 read_only: 1,
                 default: taskData.task_id.trim()
+            },
+            {
+                label: __('Project'),
+                fieldname: 'project',
+                fieldtype : 'Data',
+                read_only: 1,
+                default: taskData.project
             },
             {
                 label: __('Task Subject'),
@@ -437,6 +550,7 @@ function showAddSubtaskDialog(taskData, report) {
                 label: __('Status'),
                 fieldname: 'status',
                 fieldtype: 'Select',
+                read_only: 1,
                 options: 'Open\nWorking\nPending Review\nCompleted\nCancelled',
                 default: 'Open'
             },
@@ -495,7 +609,6 @@ function addSubtask(dialog, parentTaskData, report) {
     // Add parent task information
     values.parent_task = parentTaskData.task_id.trim();
     values.project = parentTaskData.project || null;
-
     frappe.call({
         method: 'frappe.client.insert',
         args: {
