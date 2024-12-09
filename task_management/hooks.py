@@ -139,7 +139,7 @@ doctype_js = {"Task" : "public/js/task.js"}
 doc_events = {
 	"Task": {
 		"before_validate": "task_management.task_management.doc_events.task.before_validate",
-		"validate": "task_management.task_management.doc_events.task2.validate"
+		"on_update": "task_management.task_management.doc_events.task2.validate"
 	}
 }
 
