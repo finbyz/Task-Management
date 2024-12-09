@@ -226,7 +226,7 @@ function showEditDialog(taskData, report) {
                 fieldname: 'status',
                 fieldtype: 'Select',
                 read_only:1,
-                options: 'Open\nWorking\nPending Review\nCompleted\nCancelled',
+                options: 'Open\nPlanned\nScheduled\nCompleted\nCancelled\nIn-Progress\nWorking\nPending Review\nUnplanned\nRequest For Cancel\nUnplanned',
                 default: taskDataWithoutProgress.status
             },
             {
@@ -551,7 +551,7 @@ function showAddSubtaskDialog(taskData, report) {
                 fieldname: 'status',
                 fieldtype: 'Select',
                 read_only: 1,
-                options: 'Open\nWorking\nPending Review\nCompleted\nCancelled',
+                options: 'Open\nPlanned\nScheduled\nCompleted\nCancelled\nIn-Progress\nWorking\nPending Review\nUnplanned\nRequest For Cancel\nUnplanned',
                 default: 'Open'
             },
             {

@@ -2,6 +2,23 @@ import frappe
 from frappe import _
 from frappe.utils import getdate, add_to_date
 
+def before_validate(self,method):
+    if self.status == "Planned" and (self.custom_marked_for_week_of_select_1st_day_of_the_week == None or self.custom_marked_for_week_of_select_1st_day_of_the_week == ""):
+        frappe.throw("Please specify 'Mark for Week Of' to set this task's status to Planned.")
+        
+    if self.status == "Scheduled" and ((self.exp_start_date == None or self.exp_start_date == "") or (self.exp_end_date == None or self.exp_end_date == "")):
+        frappe.throw("Expected Start Date and Expected End Date are required to set this task's status to Scheduled.")
+    
+    if self.custom_marked_for_week_of_select_1st_day_of_the_week:
+        self.custom_allow_changing_mark_of_week = 0
+    
+    if self.exp_start_date:
+        self.custom_allow_changing_expected_start = 0
+    
+    if self.exp_end_date:
+        self.custom_allow_changing_expected_end = 0
+
+
 def run_task_group_update():
     """
     Scheduled method to update all task group fields

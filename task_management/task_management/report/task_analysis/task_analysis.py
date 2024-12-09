@@ -51,7 +51,7 @@ def get_columns():
             "fieldname": "status",
             "label": _("Status"),
             "fieldtype": "Select",
-            "options": "Open\nWorking\nPending Review\nCompleted\nCancelled",
+            "options": "Open\nPlanned\nScheduled\nCompleted\nCancelled\nIn-Progress\nWorking\nPending Review\nUnplanned\nRequest For Cancel\nUnplanned",
             "width": 120
         },
         {
@@ -59,13 +59,13 @@ def get_columns():
             "label": _("Priority"),
             "fieldtype": "Select",
             "options": "Low\nMedium\nHigh",
-            "width": 100
+            "width": 80
         },
         {
             "fieldname": "description",
             "label": _("Description"),
             "fieldtype": "Text Editor",
-            "width": 300
+            "width": 280
         },
         {
             "fieldname": "edit_task",
@@ -403,11 +403,10 @@ def calculate_task_progress(task_name):
 @frappe.whitelist()
 def update_task(task_data, update_mode='single'):
     """
-    Update task and optionally its child tasks
+    Update a task and all its related tasks (children and parents)
     
     Args:
         task_data (dict): Task data to update
-        update_mode (str): 'single' for current task only, 'all' for task and all children
     """
     if not isinstance(task_data, dict):
         task_data = frappe.parse_json(task_data)
@@ -429,23 +428,71 @@ def update_task(task_data, update_mode='single'):
         # Update the current task
         update_single_task(actual_task_name, task_data)
         
-        # If update_mode is 'all', update all child tasks
-        if update_mode == 'all':
-            child_tasks = get_all_child_tasks(actual_task_name)
-            for child_task in child_tasks:
-                update_single_task(child_task.name, task_data)
+        # Get all related tasks (children and parents)
+        related_tasks = get_all_related_tasks(actual_task_name)
+        
+        # Update all related tasks
+        for related_task in related_tasks:
+            update_single_task(related_task.name, task_data)
         
         frappe.db.commit()
         
         return {
-            "message": _("Task updated successfully") if update_mode == 'single' 
-                      else _("Task and all child tasks updated successfully")
+            "message": _("Task and all related tasks updated successfully")
         }
         
     except Exception as e:
         frappe.db.rollback()
         frappe.log_error(frappe.get_traceback(), _("Task Update Error"))
-        frappe.throw(_("Error updating task: {0}").format(str(e)))
+        frappe.throw(_("Error updating task and related tasks: {0}").format(str(e)))
+
+def get_all_related_tasks(task_name):
+    """
+    Get all related tasks (children and parent tasks in the hierarchy)
+    
+    Args:
+        task_name (str): Name of the task to find related tasks for
+    
+    Returns:
+        list: List of related task documents
+    """
+    # Tasks to process
+    tasks_to_process = [task_name]
+    processed_tasks = set()
+    related_tasks = []
+    
+    while tasks_to_process:
+        current_task = tasks_to_process.pop(0)
+        if current_task in processed_tasks:
+            continue
+        
+        processed_tasks.add(current_task)
+        
+        # Find child tasks
+        children = frappe.get_all('Task',
+            filters={'parent_task': current_task},
+            fields=['name', 'parent_task']
+        )
+        
+        # Find parent tasks
+        parent_tasks = frappe.get_all('Task',
+            filters={'name': current_task},
+            fields=['parent_task']
+        )
+        parent_task_name = parent_tasks[0].get('parent_task') if parent_tasks else None
+        
+        # Add children to related tasks and tasks to process
+        for child in children:
+            related_tasks.append(frappe.get_doc('Task', child.name))
+            tasks_to_process.append(child.name)
+        
+        # Add parent tasks to related tasks and tasks to process if not already processed
+        if parent_task_name and parent_task_name not in processed_tasks:
+            parent_task = frappe.get_doc('Task', parent_task_name)
+            related_tasks.append(parent_task)
+            tasks_to_process.append(parent_task_name)
+    
+    return related_tasks
 
 def update_single_task(task_name, task_data):
     """
@@ -689,10 +736,6 @@ def validate_project_permissions(project_name):
     """
     if not frappe.has_permission('Project', 'write', project_name):
         frappe.throw(_("No permission to modify tasks in project: {0}").format(project_name))
-        
-import frappe
-from frappe import _
-from frappe.utils import getdate
 
 @frappe.whitelist()
 def copy_task_hierarchy(task_data, new_project=None, new_task_owner=None):
@@ -779,6 +822,8 @@ def copy_single_task(task_name, new_project, new_task_owner, new_parent):
     new_task.project = new_project if new_project else None
     new_task.custom_task_owner = new_task_owner if new_task_owner else None
     new_task.parent_task = new_parent if new_parent else None
+    new_task.exp_start_date = None
+    new_task.exp_end_date = None
     
     # If no new project specified, include project name in subject
     if not new_project and orig_task.project:
